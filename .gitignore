@@ -1,0 +1,19 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# Pre-built libs are intentionally committed (libs/ directory)
+# Do NOT add libs/*.a to gitignore
+
+# macOS
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Tantivy index data (created at runtime)
+*.tantivy/

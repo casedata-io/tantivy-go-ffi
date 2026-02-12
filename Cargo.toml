@@ -1,0 +1,19 @@
+[package]
+name = "tantivy-go-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "Generic Tantivy FFI crate for Go via CGO. Schema-agnostic — define fields via JSON, query via JSON DSL."
+
+[lib]
+name = "tantivy_go"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+tantivy = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
