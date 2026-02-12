@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
-use tantivy::collector::TopDocs;
+use tantivy::collector::{Count, TopDocs};
 use tantivy::query::{
     BooleanQuery, FuzzyTermQuery, Occur, PhraseQuery, Query, QueryParser,
     RegexQuery, TermQuery,
@@ -56,6 +56,8 @@ pub enum QueryDef {
         fields: Vec<String>,
         #[serde(default = "default_limit")]
         limit: usize,
+        #[serde(default)]
+        offset: usize,
     },
     #[serde(rename = "fuzzy")]
     Fuzzy {
@@ -66,6 +68,8 @@ pub enum QueryDef {
         fields: Vec<String>,
         #[serde(default = "default_limit")]
         limit: usize,
+        #[serde(default)]
+        offset: usize,
     },
     #[serde(rename = "phrase")]
     Phrase {
@@ -74,6 +78,8 @@ pub enum QueryDef {
         fields: Vec<String>,
         #[serde(default = "default_limit")]
         limit: usize,
+        #[serde(default)]
+        offset: usize,
     },
     #[serde(rename = "prefix")]
     Prefix {
@@ -82,6 +88,8 @@ pub enum QueryDef {
         fields: Vec<String>,
         #[serde(default = "default_limit")]
         limit: usize,
+        #[serde(default)]
+        offset: usize,
     },
     #[serde(rename = "term_match")]
     TermMatch {
@@ -89,6 +97,8 @@ pub enum QueryDef {
         value: serde_json::Value,
         #[serde(default = "default_limit")]
         limit: usize,
+        #[serde(default)]
+        offset: usize,
     },
     #[serde(rename = "range_i64")]
     RangeI64 {
@@ -99,6 +109,8 @@ pub enum QueryDef {
         max: Option<i64>,
         #[serde(default = "default_limit")]
         limit: usize,
+        #[serde(default)]
+        offset: usize,
     },
     #[serde(rename = "range_f64")]
     RangeF64 {
@@ -109,6 +121,8 @@ pub enum QueryDef {
         max: Option<f64>,
         #[serde(default = "default_limit")]
         limit: usize,
+        #[serde(default)]
+        offset: usize,
     },
     #[serde(rename = "bool")]
     Bool {
@@ -120,11 +134,15 @@ pub enum QueryDef {
         must_not: Vec<QueryDef>,
         #[serde(default = "default_limit")]
         limit: usize,
+        #[serde(default)]
+        offset: usize,
     },
     #[serde(rename = "all")]
     All {
         #[serde(default = "default_limit")]
         limit: usize,
+        #[serde(default)]
+        offset: usize,
     },
 }
 
@@ -145,6 +163,20 @@ impl QueryDef {
             QueryDef::All { limit, .. } => *limit,
         }
     }
+
+    fn offset(&self) -> usize {
+        match self {
+            QueryDef::Text { offset, .. } => *offset,
+            QueryDef::Fuzzy { offset, .. } => *offset,
+            QueryDef::Phrase { offset, .. } => *offset,
+            QueryDef::Prefix { offset, .. } => *offset,
+            QueryDef::TermMatch { offset, .. } => *offset,
+            QueryDef::RangeI64 { offset, .. } => *offset,
+            QueryDef::RangeF64 { offset, .. } => *offset,
+            QueryDef::Bool { offset, .. } => *offset,
+            QueryDef::All { offset, .. } => *offset,
+        }
+    }
 }
 
 // ========== Results ==========
@@ -153,6 +185,9 @@ impl QueryDef {
 pub struct SearchResults {
     pub results: Vec<serde_json::Value>,
     pub count: usize,
+    pub total_count: usize,
+    pub limit: usize,
+    pub offset: usize,
 }
 
 // ========== Index ==========
@@ -287,13 +322,18 @@ impl TantivyIndex {
     pub fn search(&self, query_json: &str) -> Result<SearchResults, String> {
         let qd: QueryDef = serde_json::from_str(query_json).map_err(|e| format!("query: {}", e))?;
         let limit = qd.limit();
+        let offset = qd.offset();
         let query = self.build_query(&qd)?;
-        self.exec(query, limit)
+        self.exec(query, limit, offset)
     }
 
-    fn exec(&self, query: Box<dyn Query>, limit: usize) -> Result<SearchResults, String> {
+    fn exec(&self, query: Box<dyn Query>, limit: usize, offset: usize) -> Result<SearchResults, String> {
         let searcher = self.reader.searcher();
-        let top = searcher.search(&query, &TopDocs::with_limit(limit)).map_err(|e| e.to_string())?;
+
+        // Use TopDocs with offset for proper pagination + Count for total matching docs
+        let collector = TopDocs::with_limit(limit).and_offset(offset);
+        let (total_count, top) = searcher.search(&query, &(Count, collector)).map_err(|e| e.to_string())?;
+
         let mut results = Vec::with_capacity(top.len());
         for (score, addr) in &top {
             let doc: TantivyDocument = searcher.doc(*addr).map_err(|e| e.to_string())?;
@@ -322,7 +362,7 @@ impl TantivyIndex {
             results.push(serde_json::Value::Object(obj));
         }
         let count = results.len();
-        Ok(SearchResults { results, count })
+        Ok(SearchResults { results, count, total_count, limit, offset })
     }
 
     fn build_query(&self, qd: &QueryDef) -> Result<Box<dyn Query>, String> {

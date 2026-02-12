@@ -36,8 +36,11 @@ type Schema struct {
 
 // SearchResults is the generic result from a search.
 type SearchResults struct {
-	Results []map[string]interface{} `json:"results"`
-	Count   int                      `json:"count"`
+	Results    []map[string]interface{} `json:"results"`
+	Count      int                      `json:"count"`
+	TotalCount int                      `json:"total_count"`
+	Limit      int                      `json:"limit"`
+	Offset     int                      `json:"offset"`
 }
 
 // Index is a handle to a Tantivy index.
